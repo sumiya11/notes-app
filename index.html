@@ -278,11 +278,11 @@ async function ghFetch(method, path, body) {
 }
 
 // ── Sync ──────────────────────────────────────────────────────────────────
-async function doSync() {
+async function doSync(opts = {}) {
+  const silent = opts.silent || false;
   const { token, owner, repo } = ghSettings();
   if (!token || !owner || !repo) {
-    showToast('Configure GitHub token in Settings first', false);
-    showScreen('settings');
+    if (!silent) { showToast('Configure GitHub token in Settings first', false); showScreen('settings'); }
     return;
   }
 
@@ -342,8 +342,8 @@ async function doSync() {
     showToast(`Synced \u2193${pulled} \u2191${pushed}`, true);
     await loadList();
   } catch (e) {
-    showToast('Sync failed: ' + e.message, false);
-    setSyncInfo('Sync failed');
+    if (!silent) showToast('Sync failed: ' + e.message, false);
+    setSyncInfo(silent ? '' : 'Sync failed');
   }
 
   btn.disabled = false;
@@ -368,13 +368,12 @@ function esc(s) {
 
 // ── List view ─────────────────────────────────────────────────────────────
 let allNotes = [];
-let activeTypeFilter = 'all';
 
 function setTypeFilter(type) {
-  activeTypeFilter = type;
-  document.querySelectorAll('.type-pill').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.type === type);
-  });
+  const input = document.getElementById('searchInput');
+  let val = input.value.replace(/\btype:\w+\b/gi, '').trim();
+  if (type !== 'all') val = val ? `${val} type:${type}` : `type:${type}`;
+  input.value = val;
   renderList();
 }
 
@@ -385,15 +384,23 @@ async function loadList() {
 }
 
 function renderList() {
-  const q = document.getElementById('searchInput').value.toLowerCase();
+  const raw = document.getElementById('searchInput').value;
+  const typeMatch = raw.match(/\btype:(\w+)/i);
+  const typeFilter = typeMatch ? typeMatch[1].toLowerCase() : 'all';
+  const text = raw.replace(/\btype:\w+/gi, '').trim().toLowerCase();
+
+  document.querySelectorAll('.type-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.type === typeFilter);
+  });
+
   const visible = allNotes
     .filter(n => !n.meta.deleted)
-    .filter(n => activeTypeFilter === 'all' || (n.meta.type || 'topic') === activeTypeFilter)
-    .filter(n => !q || n.title.toLowerCase().includes(q) || (n.body || '').toLowerCase().includes(q));
+    .filter(n => typeFilter === 'all' || (n.meta.type || 'topic') === typeFilter)
+    .filter(n => !text || n.title.toLowerCase().includes(text) || (n.body || '').toLowerCase().includes(text));
 
   const el = document.getElementById('notesList');
   if (visible.length === 0) {
-    el.innerHTML = `<div class="empty-state">${q || activeTypeFilter !== 'all' ? 'No matching notes.' : 'No notes yet.<br>Tap + New to create one, then Sync to load existing notes.'}</div>`;
+    el.innerHTML = `<div class="empty-state">${raw.trim() ? 'No matching notes.' : 'No notes yet.<br>Tap + New to create one, then Sync to load existing notes.'}</div>`;
     return;
   }
   el.innerHTML = visible.map(n => {
@@ -563,6 +570,7 @@ function showScreen(name) {
   document.getElementById(name + 'Screen').classList.add('active');
   if (name === 'list')     loadList();
   if (name === 'settings') loadSettingsForm();
+  if (name !== 'list') history.pushState({ screen: name }, '');
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────
@@ -586,7 +594,24 @@ if ('serviceWorker' in navigator) {
   showScreen('list');
   if (!localStorage.getItem('gh_token')) {
     setSyncInfo('Set up GitHub token to sync \u2192');
+  } else {
+    doSync({ silent: true });
   }
+
+  // Android back button → return to list instead of closing the app
+  window.addEventListener('popstate', () => {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('listScreen').classList.add('active');
+    loadList();
+  });
+
+  // Pull-to-refresh: swipe down on the notes list while at scroll top
+  let ptrY = 0;
+  const ptrEl = document.getElementById('notesList');
+  ptrEl.addEventListener('touchstart', e => { ptrY = e.touches[0].clientY; }, { passive: true });
+  ptrEl.addEventListener('touchend', e => {
+    if (ptrEl.scrollTop === 0 && e.changedTouches[0].clientY - ptrY > 70) doSync();
+  }, { passive: true });
 })();
 </script>
 </body>
