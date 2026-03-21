@@ -313,7 +313,7 @@ async function doSync() {
 
     setSyncInfo('Last sync: ' + new Date().toLocaleTimeString());
     showToast(`Synced \u2193${pulled} \u2191${pushed}`, true);
-    renderList();
+    await loadList();
   } catch (e) {
     showToast('Sync failed: ' + e.message, false);
     setSyncInfo('Sync failed');
