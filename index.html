@@ -38,9 +38,19 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; c
 .note-dirty { color: #e65100; font-size: 11px; margin-top: 2px; }
 .empty-state { text-align: center; color: #bbb; padding: 60px 20px; font-size: 15px; }
 .sync-info { font-size: 11px; opacity: 0.75; margin-top: 1px; }
+.note-type-badge { font-size: 11px; color: #777; text-transform: uppercase; letter-spacing: 0.3px; margin-left: 6px; }
+
+/* Type filter pills */
+.type-filters { display: flex; gap: 6px; padding: 2px 8px 8px; overflow-x: auto; flex-shrink: 0; scrollbar-width: none; }
+.type-filters::-webkit-scrollbar { display: none; }
+.type-pill { border: 1px solid #bbb; background: white; border-radius: 20px; padding: 5px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
+.type-pill.active { background: #1976d2; color: white; border-color: #1976d2; }
 
 /* Editor */
 #editorScreen .editor-body { display: flex; flex-direction: column; flex: 1; overflow: hidden; padding: 12px; gap: 10px; }
+#typeSelect { border: 1px solid #e0e0e0; border-radius: 6px; padding: 6px 8px; font-size: 13px; background: #fafafa; outline: none; flex-shrink: 0; align-self: flex-start; }
+#typeSelect:focus { border-color: #1976d2; }
+.btn-danger { background: #c62828; color: white; border: none; padding: 8px 14px; font-size: 14px; }
 #titleInput { width: 100%; border: none; border-bottom: 2px solid #e0e0e0; padding: 8px 2px; font-size: 18px; font-weight: 500; outline: none; background: transparent; flex-shrink: 0; }
 #titleInput:focus { border-bottom-color: #1976d2; }
 #bodyInput { flex: 1; width: 100%; border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px; font-size: 14px; font-family: 'Courier New', monospace; line-height: 1.6; resize: none; outline: none; }
@@ -76,11 +86,19 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; c
     </div>
     <div class="header-btns">
       <button class="btn" id="syncBtn" onclick="doSync()">&#x27f3; Sync</button>
+      <button class="btn" onclick="newDailyNote()" title="New Daily Note">&#128197;</button>
       <button class="btn" onclick="newNote()">+ New</button>
       <button class="btn btn-icon" onclick="showScreen('settings')" title="Settings">&#9881;</button>
     </div>
   </div>
   <div class="search"><input type="text" id="searchInput" placeholder="Search notes..." oninput="renderList()"></div>
+  <div class="type-filters" id="typeFilters">
+    <button class="type-pill active" onclick="setTypeFilter('all')" data-type="all">All</button>
+    <button class="type-pill" onclick="setTypeFilter('topic')" data-type="topic">Topic</button>
+    <button class="type-pill" onclick="setTypeFilter('daily')" data-type="daily">Daily</button>
+    <button class="type-pill" onclick="setTypeFilter('question')" data-type="question">Question</button>
+    <button class="type-pill" onclick="setTypeFilter('inbox')" data-type="inbox">Inbox</button>
+  </div>
   <div class="notes-list" id="notesList"></div>
 </div>
 
@@ -94,9 +112,16 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; c
   </div>
   <div class="editor-body">
     <input type="text" id="titleInput" placeholder="Title">
+    <select id="typeSelect">
+      <option value="topic">Topic</option>
+      <option value="daily">Daily</option>
+      <option value="question">Question</option>
+      <option value="inbox">Inbox</option>
+    </select>
     <textarea id="bodyInput" placeholder="Write here..."></textarea>
     <div class="editor-actions">
       <button class="btn btn-primary" style="flex:1" onclick="saveNote()">Save</button>
+      <button class="btn btn-danger" id="deleteNoteBtn" onclick="deleteNote()">Delete</button>
       <button class="btn" onclick="editorBack()">Cancel</button>
     </div>
   </div>
@@ -341,6 +366,15 @@ function esc(s) {
 
 // ── List view ─────────────────────────────────────────────────────────────
 let allNotes = [];
+let activeTypeFilter = 'all';
+
+function setTypeFilter(type) {
+  activeTypeFilter = type;
+  document.querySelectorAll('.type-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.type === type);
+  });
+  renderList();
+}
 
 async function loadList() {
   allNotes = await dbGetAll();
@@ -352,19 +386,21 @@ function renderList() {
   const q = document.getElementById('searchInput').value.toLowerCase();
   const visible = allNotes
     .filter(n => !n.meta.deleted)
+    .filter(n => activeTypeFilter === 'all' || (n.meta.type || 'topic') === activeTypeFilter)
     .filter(n => !q || n.title.toLowerCase().includes(q) || (n.body || '').toLowerCase().includes(q));
 
   const el = document.getElementById('notesList');
   if (visible.length === 0) {
-    el.innerHTML = `<div class="empty-state">${q ? 'No matching notes.' : 'No notes yet.<br>Tap + New to create one, then Sync to load existing notes.'}</div>`;
+    el.innerHTML = `<div class="empty-state">${q || activeTypeFilter !== 'all' ? 'No matching notes.' : 'No notes yet.<br>Tap + New to create one, then Sync to load existing notes.'}</div>`;
     return;
   }
   el.innerHTML = visible.map(n => {
-    const date = n.meta.modified_at ? new Date(n.meta.modified_at).toLocaleDateString() : '';
+    const d = n.meta.modified_at ? new Date(n.meta.modified_at).toLocaleDateString() : '';
+    const rtype = n.meta.type || 'topic';
     const fn = n.filename.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     return `<div class="note-item" onclick="openNote('${fn}')">
-      <div class="note-title">${esc(n.title)}</div>
-      <div class="note-date">${date}${n.dirty ? ' &bull; unsaved' : ''}</div>
+      <div class="note-title">${esc(n.title)}<span class="note-type-badge">${esc(rtype)}</span></div>
+      <div class="note-date">${d}${n.dirty ? ' &bull; unsaved' : ''}</div>
     </div>`;
   }).join('');
 }
@@ -381,21 +417,55 @@ async function openNote(filename) {
   currentOrigMeta = note.meta;
   document.getElementById('titleInput').value = note.title || '';
   document.getElementById('bodyInput').value = note.body || '';
+  document.getElementById('typeSelect').value = note.meta.type || 'topic';
+  document.getElementById('deleteNoteBtn').style.display = '';
   document.getElementById('editorTitle').textContent = 'Edit';
   editorDirty = false;
   showScreen('editor');
   setTimeout(() => document.getElementById('bodyInput').focus(), 100);
 }
 
-function newNote() {
+function newNote(initType) {
   currentFilename = null;
   currentOrigMeta = null;
   document.getElementById('titleInput').value = '';
   document.getElementById('bodyInput').value = '';
+  document.getElementById('typeSelect').value = initType || 'topic';
+  document.getElementById('deleteNoteBtn').style.display = 'none';
   document.getElementById('editorTitle').textContent = 'New Note';
   editorDirty = false;
   showScreen('editor');
   setTimeout(() => document.getElementById('titleInput').focus(), 100);
+}
+
+async function newDailyNote() {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  // Look for existing daily note with today's title
+  const existing = allNotes.find(n => !n.meta.deleted && (n.meta.type || 'topic') === 'daily' && n.title === today);
+  if (existing) { openNote(existing.filename); return; }
+  // Create new
+  const now = new Date().toISOString();
+  const filename = today + '.md';
+  const meta = {
+    title: today, type: 'daily',
+    modified_at: now, created_at: now,
+    position_x: 0.0, position_y: 0.0,
+    tags: ['daily'], edges: [],
+  };
+  await dbPut({ filename, title: today, body: '', meta, dirty: true, remote_sha: null });
+  await loadList();
+  openNote(filename);
+}
+
+async function deleteNote() {
+  if (!currentFilename) return;
+  if (!confirm('Delete this note?')) return;
+  const note = await dbGet(currentFilename);
+  if (!note) return;
+  const meta = { ...note.meta, deleted: true, modified_at: new Date().toISOString() };
+  await dbPut({ ...note, meta, dirty: true });
+  showToast('Deleted', true);
+  showScreen('list');
 }
 
 async function saveNote() {
@@ -403,9 +473,11 @@ async function saveNote() {
   const body  = document.getElementById('bodyInput').value;
   const now   = new Date().toISOString();
 
+  const rtype = document.getElementById('typeSelect').value || 'topic';
   const meta = {
     ...(currentOrigMeta || {}),
     title,
+    type:        rtype,
     modified_at: now,
     created_at:  (currentOrigMeta && currentOrigMeta.created_at) || now,
     position_x:  (currentOrigMeta?.position_x) ?? 0.0,
@@ -435,7 +507,7 @@ function editorBack() {
 }
 
 document.addEventListener('input', e => {
-  if (e.target.id === 'titleInput' || e.target.id === 'bodyInput') editorDirty = true;
+  if (e.target.id === 'titleInput' || e.target.id === 'bodyInput' || e.target.id === 'typeSelect') editorDirty = true;
 });
 
 // ── Settings ──────────────────────────────────────────────────────────────
