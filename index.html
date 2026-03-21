@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1976d2">
+<link rel="manifest" href="manifest.json">
+<title>Notes</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body { font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; color: #222; display: flex; flex-direction: column; }
+
+.header { background: #1976d2; color: white; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.header h1 { font-size: 18px; font-weight: 500; }
+.header-btns { display: flex; gap: 8px; align-items: center; }
+
+.btn { background: none; border: 1px solid currentColor; color: inherit; padding: 6px 12px; border-radius: 4px; font-size: 14px; cursor: pointer; -webkit-tap-highlight-color: transparent; user-select: none; }
+.btn:active { opacity: 0.7; }
+.btn-primary { background: #1976d2; color: white; border: none; font-size: 15px; padding: 10px; }
+.btn-icon { border: none; font-size: 18px; padding: 4px 6px; }
+
+.screen { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+.screen.active { display: flex; }
+
+/* List */
+.search { padding: 8px; flex-shrink: 0; }
+.search input { width: 100%; border: 1px solid #ddd; border-radius: 20px; padding: 8px 14px; font-size: 14px; background: white; outline: none; }
+.search input:focus { border-color: #1976d2; }
+.notes-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 8px 8px; }
+.note-item { background: white; border-radius: 8px; padding: 14px; margin-bottom: 6px; cursor: pointer; -webkit-tap-highlight-color: transparent; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.note-item:active { background: #eef5ff; }
+.note-title { font-weight: 500; font-size: 15px; margin-bottom: 3px; }
+.note-date { font-size: 12px; color: #999; }
+.note-dirty { color: #e65100; font-size: 11px; margin-top: 2px; }
+.empty-state { text-align: center; color: #bbb; padding: 60px 20px; font-size: 15px; }
+.sync-info { font-size: 11px; opacity: 0.75; margin-top: 1px; }
+
+/* Editor */
+#editorScreen .editor-body { display: flex; flex-direction: column; flex: 1; overflow: hidden; padding: 12px; gap: 10px; }
+#titleInput { width: 100%; border: none; border-bottom: 2px solid #e0e0e0; padding: 8px 2px; font-size: 18px; font-weight: 500; outline: none; background: transparent; flex-shrink: 0; }
+#titleInput:focus { border-bottom-color: #1976d2; }
+#bodyInput { flex: 1; width: 100%; border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px; font-size: 14px; font-family: 'Courier New', monospace; line-height: 1.6; resize: none; outline: none; }
+#bodyInput:focus { border-color: #1976d2; }
+.editor-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* Settings */
+.settings-body { flex: 1; overflow-y: auto; padding: 20px 16px; }
+.field { margin-bottom: 20px; }
+.field label { display: block; font-size: 12px; font-weight: 600; color: #666; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+.field input { width: 100%; border: 1px solid #ddd; border-radius: 6px; padding: 10px 12px; font-size: 15px; outline: none; }
+.field input:focus { border-color: #1976d2; }
+.field .hint { font-size: 12px; color: #999; margin-top: 5px; line-height: 1.4; }
+.field .hint a { color: #1976d2; }
+.settings-actions { padding: 0 16px 20px; flex-shrink: 0; }
+.settings-sep { border: none; border-top: 1px solid #eee; margin: 8px 0 20px; }
+
+/* Toast */
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #333; color: white; padding: 10px 20px; border-radius: 24px; font-size: 14px; z-index: 1000; opacity: 0; transition: opacity 0.2s; pointer-events: none; white-space: nowrap; max-width: 90%; text-align: center; }
+.toast.show { opacity: 1; }
+.toast.ok { background: #2e7d32; }
+.toast.err { background: #c62828; }
+</style>
+</head>
+<body>
+
+<!-- LIST SCREEN -->
+<div id="listScreen" class="screen">
+  <div class="header">
+    <div>
+      <h1>Notes</h1>
+      <div class="sync-info" id="syncInfo"></div>
+    </div>
+    <div class="header-btns">
+      <button class="btn" id="syncBtn" onclick="doSync()">&#x27f3; Sync</button>
+      <button class="btn" onclick="newNote()">+ New</button>
+      <button class="btn btn-icon" onclick="showScreen('settings')" title="Settings">&#9881;</button>
+    </div>
+  </div>
+  <div class="search"><input type="text" id="searchInput" placeholder="Search notes..." oninput="renderList()"></div>
+  <div class="notes-list" id="notesList"></div>
+</div>
+
+<!-- EDITOR SCREEN -->
+<div id="editorScreen" class="screen">
+  <div class="header">
+    <h1 id="editorTitle">New Note</h1>
+    <div class="header-btns">
+      <button class="btn" onclick="editorBack()">&#x2190; Back</button>
+    </div>
+  </div>
+  <div class="editor-body">
+    <input type="text" id="titleInput" placeholder="Title">
+    <textarea id="bodyInput" placeholder="Write here..."></textarea>
+    <div class="editor-actions">
+      <button class="btn btn-primary" style="flex:1" onclick="saveNote()">Save</button>
+      <button class="btn" onclick="editorBack()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- SETTINGS SCREEN -->
+<div id="settingsScreen" class="screen">
+  <div class="header">
+    <h1>Settings</h1>
+    <div class="header-btns">
+      <button class="btn" onclick="showScreen('list')">&#x2190; Back</button>
+    </div>
+  </div>
+  <div class="settings-body">
+    <div class="field">
+      <label>GitHub Personal Access Token</label>
+      <input type="password" id="ghToken" placeholder="ghp_...">
+      <div class="hint">
+        Needs <strong>repo</strong> scope to read/write private repos.<br>
+        <a href="https://github.com/settings/tokens/new?scopes=repo&description=Notes+PWA" target="_blank">Create token on GitHub &#x2197;</a>
+      </div>
+    </div>
+    <div class="field">
+      <label>Repository Owner</label>
+      <input type="text" id="ghOwner" placeholder="your-username">
+    </div>
+    <div class="field">
+      <label>Repository Name</label>
+      <input type="text" id="ghRepo" placeholder="data">
+      <div class="hint">The private repo where your .md notes live.</div>
+    </div>
+    <hr class="settings-sep">
+    <div class="field">
+      <label>About</label>
+      <div class="hint">
+        Notes are stored locally in your browser (IndexedDB) and sync to GitHub on demand.<br><br>
+        Works offline — edits are saved locally and pushed next time you sync.
+      </div>
+    </div>
+  </div>
+  <div class="settings-actions">
+    <button class="btn btn-primary" style="width:100%" onclick="saveSettings()">Save Settings</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ── IndexedDB ──────────────────────────────────────────────────────────────
+let db;
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('NotesDB', 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore('notes', { keyPath: 'filename' });
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+
+function dbGetAll() {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('notes', 'readonly');
+    const req = tx.objectStore('notes').getAll();
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+
+function dbGet(filename) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('notes', 'readonly');
+    const req = tx.objectStore('notes').get(filename);
+    req.onsuccess = e => resolve(e.target.result || null);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+
+function dbPut(note) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('notes', 'readwrite');
+    const req = tx.objectStore('notes').put(note);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+
+// ── Markdown format (matches desktop app exactly) ─────────────────────────
+function parseMd(content) {
+  if (!content.startsWith('---\n')) return { meta: {}, body: content };
+  const sepIdx = content.indexOf('\n---\n', 4);
+  if (sepIdx === -1) return { meta: {}, body: content };
+  try {
+    const meta = JSON.parse(content.slice(4, sepIdx));
+    // Skip '\n---\n' (5 chars) then one leading newline from '\n\n' separator
+    const bodyRaw = content.slice(sepIdx + 5);
+    const body = bodyRaw.startsWith('\n') ? bodyRaw.slice(1) : bodyRaw;
+    return { meta, body };
+  } catch {
+    return { meta: {}, body: content };
+  }
+}
+
+function buildMd(meta, body) {
+  return '---\n' + JSON.stringify(meta, null, 2) + '\n---\n\n' + body;
+}
+
+// ── Base64 (Unicode-safe) ─────────────────────────────────────────────────
+function toBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+function fromBase64(b64) {
+  const bin = atob(b64.replace(/\n/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+// ── GitHub API ────────────────────────────────────────────────────────────
+function ghSettings() {
+  return {
+    token: localStorage.getItem('gh_token') || '',
+    owner: localStorage.getItem('gh_owner') || '',
+    repo:  localStorage.getItem('gh_repo')  || '',
+  };
+}
+
+function ghHeaders() {
+  const { token } = ghSettings();
+  return {
+    'Authorization': `token ${token}`,
+    'Accept': 'application/vnd.github.v3+json',
+    'Content-Type': 'application/json',
+  };
+}
+
+async function ghFetch(method, path, body) {
+  const opts = { method, headers: ghHeaders() };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch('https://api.github.com' + path, opts);
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.message || `GitHub API ${r.status}`);
+  }
+  return r.json();
+}
+
+// ── Sync ──────────────────────────────────────────────────────────────────
+async function doSync() {
+  const { token, owner, repo } = ghSettings();
+  if (!token || !owner || !repo) {
+    showToast('Configure GitHub token in Settings first', false);
+    showScreen('settings');
+    return;
+  }
+
+  const btn = document.getElementById('syncBtn');
+  btn.disabled = true;
+  btn.textContent = '\u27f3 ...';
+  setSyncInfo('Syncing\u2026');
+
+  try {
+    // 1. Remote file list
+    const remoteList = await ghFetch('GET', `/repos/${owner}/${repo}/contents/`);
+    const remoteMd = remoteList.filter(f => f.type === 'file' && f.name.endsWith('.md'));
+    const remoteMap = Object.fromEntries(remoteMd.map(f => [f.name, f]));
+
+    // 2. Local notes
+    const localNotes = await dbGetAll();
+    const localMap = Object.fromEntries(localNotes.map(n => [n.filename, n]));
+
+    let pulled = 0, pushed = 0;
+
+    // 3. Pull: remote files new or SHA-changed
+    for (const rf of remoteMd) {
+      const local = localMap[rf.name];
+      if (local && local.remote_sha === rf.sha) continue; // unchanged
+
+      const fd = await ghFetch('GET', `/repos/${owner}/${repo}/contents/${rf.name}`);
+      const content = fromBase64(fd.content);
+      const { meta, body } = parseMd(content);
+
+      if (local && local.dirty) {
+        // Conflict: keep whichever is newer
+        const localDate  = new Date(local.meta.modified_at || 0);
+        const remoteDate = new Date(meta.modified_at || 0);
+        if (remoteDate <= localDate) continue; // local wins → push below
+      }
+
+      await dbPut({ filename: rf.name, title: meta.title || rf.name, body, meta, dirty: false, remote_sha: rf.sha });
+      pulled++;
+    }
+
+    // 4. Push dirty local notes
+    for (const note of localNotes) {
+      if (!note.dirty) continue;
+      const content = buildMd(note.meta, note.body);
+      const remote = remoteMap[note.filename];
+      const sha = note.remote_sha || (remote ? remote.sha : undefined);
+      const result = await ghFetch('PUT', `/repos/${owner}/${repo}/contents/${note.filename}`, {
+        message: `sync ${new Date().toISOString().slice(0, 16)}`,
+        content: toBase64(content),
+        ...(sha ? { sha } : {}),
+      });
+      await dbPut({ ...note, dirty: false, remote_sha: result.content.sha });
+      pushed++;
+    }
+
+    setSyncInfo('Last sync: ' + new Date().toLocaleTimeString());
+    showToast(`Synced \u2193${pulled} \u2191${pushed}`, true);
+    renderList();
+  } catch (e) {
+    showToast('Sync failed: ' + e.message, false);
+    setSyncInfo('Sync failed');
+  }
+
+  btn.disabled = false;
+  btn.textContent = '\u27f3 Sync';
+}
+
+function setSyncInfo(msg) {
+  document.getElementById('syncInfo').textContent = msg;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function safeFilename(title) {
+  const s = title.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').toLowerCase();
+  return (s || 'untitled') + '.md';
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+// ── List view ─────────────────────────────────────────────────────────────
+let allNotes = [];
+
+async function loadList() {
+  allNotes = await dbGetAll();
+  allNotes.sort((a, b) => (b.meta.modified_at || '').localeCompare(a.meta.modified_at || ''));
+  renderList();
+}
+
+function renderList() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const visible = allNotes
+    .filter(n => !n.meta.deleted)
+    .filter(n => !q || n.title.toLowerCase().includes(q) || (n.body || '').toLowerCase().includes(q));
+
+  const el = document.getElementById('notesList');
+  if (visible.length === 0) {
+    el.innerHTML = `<div class="empty-state">${q ? 'No matching notes.' : 'No notes yet.<br>Tap + New to create one, then Sync to load existing notes.'}</div>`;
+    return;
+  }
+  el.innerHTML = visible.map(n => {
+    const date = n.meta.modified_at ? new Date(n.meta.modified_at).toLocaleDateString() : '';
+    const fn = n.filename.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return `<div class="note-item" onclick="openNote('${fn}')">
+      <div class="note-title">${esc(n.title)}</div>
+      <div class="note-date">${date}${n.dirty ? ' &bull; unsaved' : ''}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Editor view ───────────────────────────────────────────────────────────
+let currentFilename = null;
+let currentOrigMeta = null;
+let editorDirty = false;
+
+async function openNote(filename) {
+  const note = await dbGet(filename);
+  if (!note) { showToast('Note not found', false); return; }
+  currentFilename = filename;
+  currentOrigMeta = note.meta;
+  document.getElementById('titleInput').value = note.title || '';
+  document.getElementById('bodyInput').value = note.body || '';
+  document.getElementById('editorTitle').textContent = 'Edit';
+  editorDirty = false;
+  showScreen('editor');
+  setTimeout(() => document.getElementById('bodyInput').focus(), 100);
+}
+
+function newNote() {
+  currentFilename = null;
+  currentOrigMeta = null;
+  document.getElementById('titleInput').value = '';
+  document.getElementById('bodyInput').value = '';
+  document.getElementById('editorTitle').textContent = 'New Note';
+  editorDirty = false;
+  showScreen('editor');
+  setTimeout(() => document.getElementById('titleInput').focus(), 100);
+}
+
+async function saveNote() {
+  const title = document.getElementById('titleInput').value.trim() || 'Untitled';
+  const body  = document.getElementById('bodyInput').value;
+  const now   = new Date().toISOString();
+
+  const meta = {
+    ...(currentOrigMeta || {}),
+    title,
+    modified_at: now,
+    created_at:  (currentOrigMeta && currentOrigMeta.created_at) || now,
+    position_x:  (currentOrigMeta?.position_x) ?? 0.0,
+    position_y:  (currentOrigMeta?.position_y) ?? 0.0,
+    tags:        currentOrigMeta?.tags  || [],
+    edges:       currentOrigMeta?.edges || [],
+  };
+
+  const filename = currentFilename || safeFilename(title);
+  const existing = currentFilename ? await dbGet(currentFilename) : null;
+
+  await dbPut({
+    filename, title, body, meta,
+    dirty: true,
+    remote_sha: existing ? existing.remote_sha : null,
+  });
+
+  editorDirty = false;
+  showToast('Saved locally', true);
+  await loadList();
+  showScreen('list');
+}
+
+function editorBack() {
+  if (editorDirty && !confirm('Discard unsaved changes?')) return;
+  showScreen('list');
+}
+
+document.addEventListener('input', e => {
+  if (e.target.id === 'titleInput' || e.target.id === 'bodyInput') editorDirty = true;
+});
+
+// ── Settings ──────────────────────────────────────────────────────────────
+function loadSettingsForm() {
+  document.getElementById('ghToken').value = localStorage.getItem('gh_token') || '';
+  document.getElementById('ghOwner').value = localStorage.getItem('gh_owner') || '';
+  document.getElementById('ghRepo').value  = localStorage.getItem('gh_repo')  || '';
+}
+
+function saveSettings() {
+  const token = document.getElementById('ghToken').value.trim();
+  const owner = document.getElementById('ghOwner').value.trim();
+  const repo  = document.getElementById('ghRepo').value.trim();
+  if (!token || !owner || !repo) { showToast('All fields required', false); return; }
+  localStorage.setItem('gh_token', token);
+  localStorage.setItem('gh_owner', owner);
+  localStorage.setItem('gh_repo',  repo);
+  showToast('Settings saved', true);
+  showScreen('list');
+}
+
+// ── Screens ───────────────────────────────────────────────────────────────
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(name + 'Screen').classList.add('active');
+  if (name === 'list')     loadList();
+  if (name === 'settings') loadSettingsForm();
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg, ok) {
+  const t = document.getElementById('toast');
+  clearTimeout(toastTimer);
+  t.textContent = msg;
+  t.className = 'toast show ' + (ok ? 'ok' : 'err');
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ── Service Worker ────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+(async () => {
+  db = await openDb();
+  showScreen('list');
+  if (!localStorage.getItem('gh_token')) {
+    setSyncInfo('Set up GitHub token to sync \u2192');
+  }
+})();
+</script>
+</body>
+</html>
