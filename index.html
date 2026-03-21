@@ -56,6 +56,8 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; c
 #bodyInput { flex: 1; width: 100%; border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px; font-size: 14px; font-family: 'Courier New', monospace; line-height: 1.6; resize: none; outline: none; }
 #bodyInput:focus { border-color: #1976d2; }
 .editor-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.cheatsheet { font-size: 11px; color: #aaa; flex-shrink: 0; padding: 2px 2px; font-family: 'Courier New', monospace; line-height: 1.8; }
+.cheatsheet span { background: #f0f0f0; border-radius: 3px; padding: 1px 5px; margin-right: 6px; color: #555; white-space: nowrap; }
 
 /* Settings */
 .settings-body { flex: 1; overflow-y: auto; padding: 20px 16px; }
@@ -118,6 +120,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; c
       <option value="inbox">Inbox</option>
     </select>
     <textarea id="bodyInput" placeholder="Write here..."></textarea>
+    <div class="cheatsheet" id="cheatsheet"></div>
     <div class="editor-actions">
       <button class="btn btn-primary" style="flex:1" onclick="saveNote()">Save</button>
       <button class="btn btn-danger" id="deleteNoteBtn" onclick="deleteNote()">Delete</button>
@@ -409,6 +412,30 @@ let currentFilename = null;
 let currentOrigMeta = null;
 let editorDirty = false;
 
+// ── Editor helpers ───────────────────────────────────────────────────────
+const PLACEHOLDERS = {
+  topic:    'Write here...\n\n## Open\n- ',
+  daily:    'What happened today...\n\n## Open\n- ',
+  question: 'Describe the question...\n\n## Open\n- sub-questions\n\n## Answer\n(fill when resolved)',
+  inbox:    'Quick capture...',
+};
+
+const CHEATSHEET_CMDS = [
+  '\\title{text}', '\\tag{word}', '\\rel{a}{b}',
+  '\\date{text}', '\\todo{text}', '\\question{text}',
+];
+
+function updateEditorForType(type) {
+  document.getElementById('bodyInput').placeholder = PLACEHOLDERS[type] || PLACEHOLDERS.topic;
+  document.getElementById('cheatsheet').innerHTML =
+    CHEATSHEET_CMDS.map(c => `<span>${esc(c)}</span>`).join(' ');
+}
+
+document.getElementById('typeSelect').addEventListener('change', e => {
+  updateEditorForType(e.target.value);
+  editorDirty = true;
+});
+
 async function openNote(filename) {
   const note = await dbGet(filename);
   if (!note) { showToast('Note not found', false); return; }
@@ -419,6 +446,7 @@ async function openNote(filename) {
   document.getElementById('typeSelect').value = note.meta.type || 'topic';
   document.getElementById('deleteNoteBtn').style.display = '';
   document.getElementById('editorTitle').textContent = 'Edit';
+  updateEditorForType(note.meta.type || 'topic');
   editorDirty = false;
   showScreen('editor');
   setTimeout(() => document.getElementById('bodyInput').focus(), 100);
@@ -432,6 +460,7 @@ function newNote(initType) {
   document.getElementById('typeSelect').value = initType || 'topic';
   document.getElementById('deleteNoteBtn').style.display = 'none';
   document.getElementById('editorTitle').textContent = 'New Note';
+  updateEditorForType(initType || 'topic');
   editorDirty = false;
   showScreen('editor');
   setTimeout(() => document.getElementById('titleInput').focus(), 100);
