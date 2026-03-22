@@ -391,7 +391,7 @@ function renderList() {
   });
 
   const visible = allNotes
-    .filter(n => !n.meta.deleted)
+    .filter(n => !n.meta.deleted && n.filename !== 'FORMAT.md')
     .filter(n => {
       if (typeFilter === 'all') return true;
       if (typeFilter === 'open')
